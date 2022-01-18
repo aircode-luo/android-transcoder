@@ -44,11 +44,11 @@ public class VideoTrackTranscoder implements TrackTranscoder {
     private OutputSurface mDecoderOutputSurfaceWrapper;
     private InputSurface mEncoderInputSurfaceWrapper;
     private boolean mIsExtractorEOS;
-    private boolean mIsDecoderEOS;
+    private boolean mIsDecoderEOS; //  EOS: End of Stream
     private boolean mIsEncoderEOS;
     private boolean mDecoderStarted;
     private boolean mEncoderStarted;
-    private long mWrittenPresentationTimeUs;
+    private long mWrittenPresentationTimeUs; // 编码完成写入缓冲区的视频数据的时长
 
     public VideoTrackTranscoder(MediaExtractor extractor, int trackIndex,
                                 MediaFormat outputFormat, QueuedMuxer muxer) {
@@ -62,6 +62,7 @@ public class VideoTrackTranscoder implements TrackTranscoder {
     public void setup() {
         mExtractor.selectTrack(mTrackIndex);
         try {
+            // 编码器
             mEncoder = MediaCodec.createEncoderByType(mOutputFormat.getString(MediaFormat.KEY_MIME));
         } catch (IOException e) {
             throw new IllegalStateException(e);
@@ -74,6 +75,7 @@ public class VideoTrackTranscoder implements TrackTranscoder {
         mEncoderOutputBuffers = mEncoder.getOutputBuffers();
 
         MediaFormat inputFormat = mExtractor.getTrackFormat(mTrackIndex);
+        // TODO: 2022/1/18 这个做什么的？
         if (inputFormat.containsKey(MediaFormatExtraConstants.KEY_ROTATION_DEGREES)) {
             // Decoded video is rotated automatically in Android 5.0 lollipop.
             // Turn off here because we don't want to encode rotated one.
@@ -102,6 +104,8 @@ public class VideoTrackTranscoder implements TrackTranscoder {
         boolean busy = false;
 
         int status;
+        // TODO: 2022/1/16 不是应该先读取 drainExtractor
+        // 首次执行 stepPipeline 方法时，因为没有解码数据，返回状态 DRAIN_STATE_NONE
         while (drainEncoder(0) != DRAIN_STATE_NONE) busy = true;
         do {
             status = drainDecoder(0);
@@ -148,26 +152,38 @@ public class VideoTrackTranscoder implements TrackTranscoder {
 
     private int drainExtractor(long timeoutUs) {
         if (mIsExtractorEOS) return DRAIN_STATE_NONE;
+
         int trackIndex = mExtractor.getSampleTrackIndex();
-        if (trackIndex >= 0 && trackIndex != mTrackIndex) {
+        if (trackIndex >= 0 && trackIndex != mTrackIndex) { // 判断是否是当前的视频轨道
             return DRAIN_STATE_NONE;
         }
+        // result 输入缓存的 index，通过getInputBuffers()得到的是输入缓存数组，通过index和输入缓存数组可以得到当前请求的输入缓存
         int result = mDecoder.dequeueInputBuffer(timeoutUs);
         if (result < 0) return DRAIN_STATE_NONE;
+
+        //TODO 视频缓存读完了？
         if (trackIndex < 0) {
             mIsExtractorEOS = true;
+            // 当你将一个带有end-of-stream marker标记的输入缓存入队列时，MediaCodec将转入End-of-Stream子状态。在这种状态下，MediaCodec
+            // 不再接收之后的输入缓存，但它仍然产生输出缓存直到end-of-stream标记输出。
             mDecoder.queueInputBuffer(result, 0, 0, 0, MediaCodec.BUFFER_FLAG_END_OF_STREAM);
             return DRAIN_STATE_NONE;
         }
+        // 读取采样数据到 mDecoderInputBuffers[result] 输入缓冲区
         int sampleSize = mExtractor.readSampleData(mDecoderInputBuffers[result], 0);
         boolean isKeyFrame = (mExtractor.getSampleFlags() & MediaExtractor.SAMPLE_FLAG_SYNC) != 0;
+        // 把 mDecoderInputBuffers[result] 输入缓冲区数据进行解码
         mDecoder.queueInputBuffer(result, 0, sampleSize, mExtractor.getSampleTime(), isKeyFrame ? MediaCodec.BUFFER_FLAG_SYNC_FRAME : 0);
+        //在MediaExtractor执行完一次readSampleData方法后，需要调用advance()去跳到下一个sample，然后再次读取数据
         mExtractor.advance();
+
         return DRAIN_STATE_CONSUMED;
     }
 
     private int drainDecoder(long timeoutUs) {
+        // 解码完成
         if (mIsDecoderEOS) return DRAIN_STATE_NONE;
+
         int result = mDecoder.dequeueOutputBuffer(mBufferInfo, timeoutUs);
         switch (result) {
             case MediaCodec.INFO_TRY_AGAIN_LATER:
@@ -195,8 +211,15 @@ public class VideoTrackTranscoder implements TrackTranscoder {
     }
 
     private int drainEncoder(long timeoutUs) {
+        // 编码完成
         if (mIsEncoderEOS) return DRAIN_STATE_NONE;
+        // 从输出缓冲区取数据进行编码
+        //  1. INFO_TRY_AGAIN_LATER=-1 等待超时，有可能没数据
+        //  2. INFO_OUTPUT_FORMAT_CHANGED=-2 媒体格式更改
+        //  3. INFO_OUTPUT_BUFFERS_CHANGED=-3 缓冲区已更改（过时）
+        //  4. 大于等于0的为缓冲区数据下标
         int result = mEncoder.dequeueOutputBuffer(mBufferInfo, timeoutUs);
+
         switch (result) {
             case MediaCodec.INFO_TRY_AGAIN_LATER:
                 return DRAIN_STATE_NONE;
@@ -210,6 +233,7 @@ public class VideoTrackTranscoder implements TrackTranscoder {
                 mEncoderOutputBuffers = mEncoder.getOutputBuffers();
                 return DRAIN_STATE_SHOULD_RETRY_IMMEDIATELY;
         }
+
         if (mActualOutputFormat == null) {
             throw new RuntimeException("Could not determine actual output format.");
         }

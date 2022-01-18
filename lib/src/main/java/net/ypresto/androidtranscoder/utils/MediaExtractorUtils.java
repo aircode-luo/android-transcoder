@@ -40,6 +40,7 @@ public class MediaExtractorUtils {
         TrackResult trackResult = new TrackResult();
         trackResult.mVideoTrackIndex = -1;
         trackResult.mAudioTrackIndex = -1;
+        // 通常是2个，第一个视频，第二个音频
         int trackCount = extractor.getTrackCount();
         for (int i = 0; i < trackCount; i++) {
             MediaFormat format = extractor.getTrackFormat(i);

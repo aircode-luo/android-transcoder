@@ -30,6 +30,7 @@ import java.util.List;
  */
 public class QueuedMuxer {
     private static final String TAG = "QueuedMuxer";
+    // TODO: 2022/1/16 如果超出了，会自动扩容？
     private static final int BUFFER_SIZE = 64 * 1024; // I have no idea whether this value is appropriate or not...
     private final MediaMuxer mMuxer;
     private final Listener mListener;
@@ -37,10 +38,11 @@ public class QueuedMuxer {
     private MediaFormat mAudioFormat;
     private int mVideoTrackIndex;
     private int mAudioTrackIndex;
-    private ByteBuffer mByteBuffer;
-    private final List<SampleInfo> mSampleInfoList;
+    private ByteBuffer mByteBuffer; // 缓存已编码数据待写入数据
+    private final List<SampleInfo> mSampleInfoList; // 缓存采样片段信息
     private boolean mStarted;
 
+    // TODO: 2022/1/16  MediaMuxer 创建逻辑也封装在这个类
     public QueuedMuxer(MediaMuxer muxer, Listener listener) {
         mMuxer = muxer;
         mListener = listener;
@@ -75,6 +77,9 @@ public class QueuedMuxer {
         if (mByteBuffer == null) {
             mByteBuffer = ByteBuffer.allocate(0);
         }
+
+        // ByteBuffer 当写数据到buffer中时，limit一般和capacity相等，当读数据时，limit代表buffer中有效数据的长度。
+        // flip() 把limit设为当前position，把position设为0，一般在从Buffer读出数据前调用。
         mByteBuffer.flip();
         Log.v(TAG, "Output format determined, writing " + mSampleInfoList.size() +
                 " samples / " + mByteBuffer.limit() + " bytes to muxer.");
@@ -89,17 +94,27 @@ public class QueuedMuxer {
         mByteBuffer = null;
     }
 
+    /**
+     *
+     * @param sampleType
+     * @param byteBuf
+     * @param bufferInfo 描述 byteBuf 参数的相关信息
+     */
     public void writeSampleData(SampleType sampleType, ByteBuffer byteBuf, MediaCodec.BufferInfo bufferInfo) {
         if (mStarted) {
             mMuxer.writeSampleData(getTrackIndexForSampleType(sampleType), byteBuf, bufferInfo);
             return;
         }
+
+        // 如果 mMuxer 没有启动，先缓存数据，启动了在写入
         byteBuf.limit(bufferInfo.offset + bufferInfo.size);
         byteBuf.position(bufferInfo.offset);
         if (mByteBuffer == null) {
             mByteBuffer = ByteBuffer.allocateDirect(BUFFER_SIZE).order(ByteOrder.nativeOrder());
         }
+        // 缓存总数据
         mByteBuffer.put(byteBuf);
+        // 缓存每个采用片段的信息
         mSampleInfoList.add(new SampleInfo(sampleType, bufferInfo.size, bufferInfo));
     }
 

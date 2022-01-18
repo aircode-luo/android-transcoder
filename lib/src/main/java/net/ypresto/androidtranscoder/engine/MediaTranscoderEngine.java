@@ -44,7 +44,7 @@ public class MediaTranscoderEngine {
     private TrackTranscoder mAudioTrackTranscoder;
     private MediaExtractor mExtractor;
     private MediaMuxer mMuxer;
-    private volatile double mProgress;
+    private volatile double mProgress; // 压缩编码进度
     private ProgressCallback mProgressCallback;
     private long mDurationUs;
 
@@ -140,6 +140,7 @@ public class MediaTranscoderEngine {
             // skip
         }
 
+        // TODO: 2022/1/15 视频地理位置元数据有什么作用？
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT) {
             String locationString = mediaMetadataRetriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_LOCATION);
             if (locationString != null) {
@@ -201,6 +202,8 @@ public class MediaTranscoderEngine {
         while (!(mVideoTrackTranscoder.isFinished() && mAudioTrackTranscoder.isFinished())) {
             boolean stepped = mVideoTrackTranscoder.stepPipeline()
                     || mAudioTrackTranscoder.stepPipeline();
+
+            // 更新压缩进度
             loopCount++;
             if (mDurationUs > 0 && loopCount % PROGRESS_INTERVAL_STEPS == 0) {
                 double videoProgress = mVideoTrackTranscoder.isFinished() ? 1.0 : Math.min(1.0, (double) mVideoTrackTranscoder.getWrittenPresentationTimeUs() / mDurationUs);

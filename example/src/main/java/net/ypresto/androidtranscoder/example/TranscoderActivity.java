@@ -16,7 +16,7 @@ import android.widget.ProgressBar;
 import android.widget.Toast;
 
 import net.ypresto.androidtranscoder.MediaTranscoder;
-import net.ypresto.androidtranscoder.format.MediaFormatStrategyPresets;
+import net.ypresto.androidtranscoder.format.Android480pFormatStrategy;
 
 import java.io.File;
 import java.io.FileDescriptor;
@@ -112,7 +112,7 @@ public class TranscoderActivity extends Activity {
                     };
                     Log.d(TAG, "transcoding into " + file);
                     mFuture = MediaTranscoder.getInstance().transcodeVideo(fileDescriptor, file.getAbsolutePath(),
-                            MediaFormatStrategyPresets.createAndroid720pStrategy(8000 * 1000, 128 * 1000, 1), listener);
+                            new Android480pFormatStrategy(), listener);
                     switchButtonEnabled(true);
                 }
                 break;
