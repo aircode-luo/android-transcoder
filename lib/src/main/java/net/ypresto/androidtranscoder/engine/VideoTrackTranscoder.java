@@ -169,19 +169,18 @@ public class VideoTrackTranscoder implements TrackTranscoder {
             mDecoder.queueInputBuffer(result, 0, 0, 0, MediaCodec.BUFFER_FLAG_END_OF_STREAM);
             return DRAIN_STATE_NONE;
         }
-        // 读取采样数据到 mDecoderInputBuffers[result] 输入缓冲区
+        // 读取采样数据到 mDecoderInputBuffers[result] 输入缓冲区，每次只读取一帧数据
         int sampleSize = mExtractor.readSampleData(mDecoderInputBuffers[result], 0);
         boolean isKeyFrame = (mExtractor.getSampleFlags() & MediaExtractor.SAMPLE_FLAG_SYNC) != 0;
         // 把 mDecoderInputBuffers[result] 输入缓冲区数据进行解码
         mDecoder.queueInputBuffer(result, 0, sampleSize, mExtractor.getSampleTime(), isKeyFrame ? MediaCodec.BUFFER_FLAG_SYNC_FRAME : 0);
-        //在MediaExtractor执行完一次readSampleData方法后，需要调用advance()去跳到下一个sample，然后再次读取数据
+        //在MediaExtractor执行完一次readSampleData方法后，需要调用advance()去跳到下一个sample(即下一帧)，然后再次读取数据
         mExtractor.advance();
 
         return DRAIN_STATE_CONSUMED;
     }
 
     private int drainDecoder(long timeoutUs) {
-        // 解码完成
         if (mIsDecoderEOS) return DRAIN_STATE_NONE;
 
         int result = mDecoder.dequeueOutputBuffer(mBufferInfo, timeoutUs);
@@ -197,6 +196,8 @@ public class VideoTrackTranscoder implements TrackTranscoder {
             mIsDecoderEOS = true;
             mBufferInfo.size = 0;
         }
+
+        // TODO: 2022/1/18 为啥要渲染呢？通过 Surface 传递数据？
         boolean doRender = (mBufferInfo.size > 0);
         // NOTE: doRender will block if buffer (of encoder) is full.
         // Refer: http://bigflake.com/mediacodec/CameraToMpegTest.java.txt
@@ -211,8 +212,8 @@ public class VideoTrackTranscoder implements TrackTranscoder {
     }
 
     private int drainEncoder(long timeoutUs) {
-        // 编码完成
         if (mIsEncoderEOS) return DRAIN_STATE_NONE;
+
         // 从输出缓冲区取数据进行编码
         //  1. INFO_TRY_AGAIN_LATER=-1 等待超时，有可能没数据
         //  2. INFO_OUTPUT_FORMAT_CHANGED=-2 媒体格式更改
